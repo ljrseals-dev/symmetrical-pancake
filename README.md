@@ -18,7 +18,7 @@
 
 The system is structured around a three-stage execution pipeline designed for seamless configurability, low latency, and comprehensive auditability.
 
-![How Symmetrical-Pancake Works](watermarked_img_9441612794303554183.jpg)[span_0](start_span)[span_0](end_span)
+![How Symmetrical-Pancake Works](1792027701983.jpg)[span_0](start_span)[span_0](end_span)
 
 ### Core Architectural Phases
 
