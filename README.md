@@ -22,19 +22,19 @@ The system is structured around a three-stage execution pipeline designed for se
 
 ### Core Architectural Phases
 
-1. **Configuration & Settings (Stage 1)**[span_1](start_span)[span_1](end_span)
-   * **User Input & Config Loading:** Ingests parameters, execution rules, and workflow options via structured JSON configuration files (`config/default.json`)[span_2](start_span)[span_2](end_span).
+1. **Configuration & Settings (Stage 1)**
+   * **User Input & Config Loading:** Ingests parameters, execution rules, and workflow options via structured JSON configuration files (`config/default.json`).
    * **Environment Prep:** Validates runtime parameters before handing control over to the core engine.
 
-2. **Modular Execution Engine (Stage 2)**[span_3](start_span)[span_3](end_span)
+2. **Modular Execution Engine (Stage 2)**
    * **Data Parser:** Efficiently ingests and structures incoming raw datasets.
    * **Algorithm Runner:** Executes core compute routines, data processing logic, and algorithmic pipelines.
    * **Filter & Transform:** Applies modular transformations to optimize performance and data integrity.
    * **Internal Logger:** Captures runtime metrics and state changes in real-time.
 
-3. **Results & Diagnostic Logging (Stage 3)**[span_4](start_span)[span_4](end_span)
+3. **Results & Diagnostic Logging (Stage 3)**
    * **Optimized Output Generation:** Produces structured reports and cleaned data artifacts[span_5](start_span)[span_5](end_span).
-   * **Comprehensive Trace Logging:** Dumps detailed diagnostics to facilitate debugging, profiling, and compliance tracking[span_6](start_span)[span_6](end_span).
+   * **Comprehensive Trace Logging:** Dumps detailed diagnostics to facilitate debugging, profiling, and compliance tracking.
 
 ---
 
