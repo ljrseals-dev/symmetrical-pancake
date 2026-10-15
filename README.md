@@ -33,17 +33,17 @@ The system is structured around a three-stage execution pipeline designed for se
    * **Internal Logger:** Captures runtime metrics and state changes in real-time.
 
 3. **Results & Diagnostic Logging (Stage 3)**
-   * **Optimized Output Generation:** Produces structured reports and cleaned data artifacts[span_5](start_span)[span_5](end_span).
+   * **Optimized Output Generation:** Produces structured reports and cleaned data artifacts.
    * **Comprehensive Trace Logging:** Dumps detailed diagnostics to facilitate debugging, profiling, and compliance tracking.
 
 ---
 
 ## ✨ Key Technical Features
 
-* **Modular Architecture:** Easily plug in custom extensions, parsing modules, or algorithm runners without altering core pipeline logic[span_7](start_span)[span_7](end_span).
-* **Optimized Performance:** Built with lightweight routines and low resource overhead to ensure high-speed processing[span_8](start_span)[span_8](end_span).
-* **Comprehensive Logging:** Built-in tracking and diagnostic logging for seamless debugging, monitoring, and verification[span_9](start_span)[span_9](end_span).
-* **Flexible Configurations:** Dynamic parameter management tailored for diverse target environments[span_10](start_span)[span_10](end_span).
+* **Modular Architecture:** Easily plug in custom extensions, parsing modules, or algorithm runners without altering core pipeline logic.
+* **Optimized Performance:** Built with lightweight routines and low resource overhead to ensure high-speed processing.
+* **Comprehensive Logging:** Built-in tracking and diagnostic logging for seamless debugging, monitoring, and verification.
+* **Flexible Configurations:** Dynamic parameter management tailored for diverse target environments.
 
 ---
 
